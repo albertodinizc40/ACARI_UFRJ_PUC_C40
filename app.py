@@ -19,13 +19,19 @@ def carregar_planilhas(caminho_arquivo):
         df = pd.read_excel(caminho_arquivo, sheet_name=aba)
         df.columns = [str(c).strip() for c in df.columns]
 
+        # 🔹 renomeia Sheet1
+        if aba.lower() == "sheet1":
+            nome_aba = "Ruas Liderença"
+        else:
+            nome_aba = aba
+
         colunas_obrigatorias = ["Latitude", "Longitude"]
         for col in colunas_obrigatorias:
             if col not in df.columns:
                 raise ValueError(f"A aba '{aba}' não tem a coluna obrigatória: {col}")
 
         if "Rua" not in df.columns:
-            df["Rua"] = aba
+            df["Rua"] = nome_aba
         if "CEP" not in df.columns:
             df["CEP"] = ""
         if "Bairro" not in df.columns:
@@ -39,7 +45,7 @@ def carregar_planilhas(caminho_arquivo):
         df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
         df = df.dropna(subset=["Latitude", "Longitude"]).copy()
 
-        dados[aba] = df
+        dados[nome_aba] = df
 
     return dados
 
@@ -69,11 +75,12 @@ def criar_legenda(cores_por_aba):
         left: 40px;
         width: 220px;
         z-index: 9999;
-        background: white;
-        border: 2px solid #444;
+        background: #000000;
+        color: #ffffff;
+        border: 2px solid #000000;
         border-radius: 8px;
         padding: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
     ">
         <div style="font-size:16px; font-weight:700; margin-bottom:10px;">
             Legenda por tabela
@@ -92,9 +99,6 @@ def gerar_mapa(dados, tamanho_rotulo=18):
     for aba, df in dados.items():
         todas_lat.extend(df["Latitude"].tolist())
         todas_lon.extend(df["Longitude"].tolist())
-
-    if not todas_lat or not todas_lon:
-        raise ValueError("Nenhum ponto válido com latitude e longitude foi encontrado.")
 
     centro = [
         sum(todas_lat) / len(todas_lat),
@@ -166,25 +170,8 @@ def gerar_mapa(dados, tamanho_rotulo=18):
 
         for _, row in df.iterrows():
             rua = str(row.get("Rua", "")).strip()
-            cep = str(row.get("CEP", "")).strip()
-            bairro = str(row.get("Bairro", "")).strip()
-            cidade = str(row.get("Cidade", "")).strip()
-            localizacao = str(row.get("Localização", "")).strip()
             lat = row["Latitude"]
             lon = row["Longitude"]
-
-            popup_html = f"""
-            <div style='font-size:14px;'>
-                <div><b>Tabela:</b> {html.escape(aba)}</div>
-                <div><b>Rua:</b> {html.escape(rua)}</div>
-                <div><b>CEP:</b> {html.escape(cep)}</div>
-                <div><b>Bairro:</b> {html.escape(bairro)}</div>
-                <div><b>Cidade:</b> {html.escape(cidade)}</div>
-                <div><b>Localização:</b> {html.escape(localizacao)}</div>
-                <div><b>Latitude:</b> {lat}</div>
-                <div><b>Longitude:</b> {lon}</div>
-            </div>
-            """
 
             folium.CircleMarker(
                 location=[lat, lon],
@@ -194,7 +181,6 @@ def gerar_mapa(dados, tamanho_rotulo=18):
                 fill_color=cor,
                 fill_opacity=1,
                 weight=2,
-                popup=folium.Popup(popup_html, max_width=350),
                 tooltip=rua if rua else aba,
             ).add_to(grupo)
 
@@ -212,8 +198,7 @@ def gerar_mapa(dados, tamanho_rotulo=18):
                                 -1px -1px 0 #ffffff,
                                  1px -1px 0 #ffffff,
                                 -1px  1px 0 #ffffff,
-                                 1px  1px 0 #ffffff,
-                                 0px  0px 4px #ffffff;
+                                 1px  1px 0 #ffffff;
                             transform: translate(10px, -6px);
                         ">{html.escape(rua)}</div>
                         """
@@ -224,12 +209,10 @@ def gerar_mapa(dados, tamanho_rotulo=18):
 
     folium.LayerControl(collapsed=False).add_to(m)
 
-    min_lat = min(todas_lat)
-    max_lat = max(todas_lat)
-    min_lon = min(todas_lon)
-    max_lon = max(todas_lon)
-
-    m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
+    m.fit_bounds([
+        [min(todas_lat), min(todas_lon)],
+        [max(todas_lat), max(todas_lon)]
+    ])
 
     legenda = criar_legenda(cores_por_aba)
     m.get_root().html.add_child(folium.Element(legenda))
@@ -239,7 +222,7 @@ def gerar_mapa(dados, tamanho_rotulo=18):
 
 try:
     dados = carregar_planilhas(ARQUIVO_EXCEL)
-    mapa = gerar_mapa(dados, tamanho_rotulo=18)
+    mapa = gerar_mapa(dados)
     st_folium(mapa, use_container_width=True, height=850)
 
 except Exception as e:
