@@ -9,9 +9,6 @@ st.set_page_config(page_title="Mapa de Endereços", layout="wide")
 
 ARQUIVO_EXCEL = "Enderecos_recorrentes.xlsx"
 
-st.title("Mapa de endereços recorrentes")
-st.caption("Cada aba da planilha vira uma camada própria no mapa.")
-
 
 @st.cache_data
 def carregar_planilhas(caminho_arquivo):
@@ -25,9 +22,7 @@ def carregar_planilhas(caminho_arquivo):
         colunas_obrigatorias = ["Latitude", "Longitude"]
         for col in colunas_obrigatorias:
             if col not in df.columns:
-                raise ValueError(
-                    f"A aba '{aba}' não tem a coluna obrigatória: {col}"
-                )
+                raise ValueError(f"A aba '{aba}' não tem a coluna obrigatória: {col}")
 
         if "Rua" not in df.columns:
             df["Rua"] = aba
@@ -90,13 +85,16 @@ def criar_legenda(cores_por_aba):
     return legenda
 
 
-def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
+def gerar_mapa(dados, tamanho_rotulo=18):
     todas_lat = []
     todas_lon = []
 
-    for aba in abas_visiveis:
-        todas_lat.extend(dados[aba]["Latitude"].tolist())
-        todas_lon.extend(dados[aba]["Longitude"].tolist())
+    for aba, df in dados.items():
+        todas_lat.extend(df["Latitude"].tolist())
+        todas_lon.extend(df["Longitude"].tolist())
+
+    if not todas_lat or not todas_lon:
+        raise ValueError("Nenhum ponto válido com latitude e longitude foi encontrado.")
 
     centro = [
         sum(todas_lat) / len(todas_lat),
@@ -110,7 +108,6 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
         tiles=None,
     )
 
-    # Base 1: OpenStreetMap
     folium.TileLayer(
         tiles="OpenStreetMap",
         name="OpenStreetMap",
@@ -119,7 +116,6 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
         show=True,
     ).add_to(m)
 
-    # Base 2: mapa tradicional
     folium.TileLayer(
         tiles="CartoDB Voyager",
         name="Mapa tradicional",
@@ -128,7 +124,6 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
         show=False,
     ).add_to(m)
 
-    # Base 3: Esri satélite
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Tiles © Esri",
@@ -138,7 +133,6 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
         show=False,
     ).add_to(m)
 
-    # Camada opcional de rótulos sobre o satélite
     folium.TileLayer(
         tiles="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Labels © Esri",
@@ -164,12 +158,11 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
 
     cores_por_aba = {}
 
-    for i, aba in enumerate(abas_visiveis):
+    for i, (aba, df) in enumerate(dados.items()):
         cor = paleta[i % len(paleta)]
         cores_por_aba[aba] = cor
 
         grupo = folium.FeatureGroup(name=f"Tabela: {aba}", show=True)
-        df = dados[aba]
 
         for _, row in df.iterrows():
             rua = str(row.get("Rua", "")).strip()
@@ -202,29 +195,30 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
                 fill_opacity=1,
                 weight=2,
                 popup=folium.Popup(popup_html, max_width=350),
-                tooltip=f"{aba} | {rua}",
+                tooltip=rua if rua else aba,
             ).add_to(grupo)
 
-            folium.Marker(
-                location=[lat, lon],
-                icon=folium.DivIcon(
-                    html=f"""
-                    <div style="
-                        font-size: {tamanho_rotulo}px;
-                        font-weight: 800;
-                        color: {cor};
-                        white-space: nowrap;
-                        text-shadow:
-                            -1px -1px 0 #ffffff,
-                             1px -1px 0 #ffffff,
-                            -1px  1px 0 #ffffff,
-                             1px  1px 0 #ffffff,
-                             0px  0px 4px #ffffff;
-                        transform: translate(10px, -6px);
-                    ">{html.escape(rua)}</div>
-                    """
-                ),
-            ).add_to(grupo)
+            if rua:
+                folium.Marker(
+                    location=[lat, lon],
+                    icon=folium.DivIcon(
+                        html=f"""
+                        <div style="
+                            font-size: {tamanho_rotulo}px;
+                            font-weight: 800;
+                            color: {cor};
+                            white-space: nowrap;
+                            text-shadow:
+                                -1px -1px 0 #ffffff,
+                                 1px -1px 0 #ffffff,
+                                -1px  1px 0 #ffffff,
+                                 1px  1px 0 #ffffff,
+                                 0px  0px 4px #ffffff;
+                            transform: translate(10px, -6px);
+                        ">{html.escape(rua)}</div>
+                        """
+                    ),
+                ).add_to(grupo)
 
         grupo.add_to(m)
 
@@ -245,34 +239,8 @@ def gerar_mapa(dados, abas_visiveis, tamanho_rotulo):
 
 try:
     dados = carregar_planilhas(ARQUIVO_EXCEL)
-    abas = list(dados.keys())
-
-    st.sidebar.title("Controles")
-
-    abas_visiveis = st.sidebar.multiselect(
-        "Tabelas visíveis",
-        options=abas,
-        default=abas,
-    )
-
-    tamanho_rotulo = st.sidebar.slider(
-        "Tamanho do nome dos pontos",
-        min_value=12,
-        max_value=28,
-        value=18,
-        step=1,
-    )
-
-    if not abas_visiveis:
-        st.warning("Selecione pelo menos uma tabela na barra lateral.")
-    else:
-        mapa = gerar_mapa(dados, abas_visiveis, tamanho_rotulo)
-        st_folium(mapa, use_container_width=True, height=700)
-
-        st.subheader("Prévia dos dados")
-        for aba in abas_visiveis:
-            st.markdown(f"### {aba}")
-            st.dataframe(dados[aba], use_container_width=True)
+    mapa = gerar_mapa(dados, tamanho_rotulo=18)
+    st_folium(mapa, use_container_width=True, height=850)
 
 except Exception as e:
     st.error(f"Erro ao carregar o aplicativo: {e}")
